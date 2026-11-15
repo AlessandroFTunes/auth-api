@@ -29,7 +29,7 @@ export class Database {
 
 export const getDb = () => Database.getInstance().db;
 
-type Tx = Parameters<Parameters<NodePgDatabase["transaction"]>[0]>[0];
+export type Tx = Parameters<Parameters<NodePgDatabase["transaction"]>[0]>[0];
 
 export const createTransaction = <T>(fn: (tx: Tx) => Promise<T>): Promise<T> => {
   return getDb().transaction(fn);

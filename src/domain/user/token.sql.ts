@@ -9,5 +9,10 @@ export const refreshTokens = pgTable("refresh_tokens", {
   tokenHash: text("token_hash").notNull().unique(),
   expiresAt: timestamp("expires_at").notNull(),
   revokedAt: timestamp("revoked_at"),
+  // logout: encerrado pelo usuário; rotated: trocado por um novo no refresh;
+  // reuse_detected: encerrado em massa após reuso de token rotacionado.
+  revokedReason: text("revoked_reason", {
+    enum: ["logout", "rotated", "reuse_detected"],
+  }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
