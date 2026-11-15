@@ -3,6 +3,7 @@ export class AppError extends Error {
     public readonly status: number,
     public readonly code: string,
     message: string,
+    public readonly retryAfter?: number,
   ) {
     super(message);
     this.name = "AppError";
@@ -13,7 +14,12 @@ export function errorHandle(error: unknown): Response {
   if (error instanceof AppError) {
     return Response.json(
       { error: { code: error.code, message: error.message } },
-      { status: error.status },
+      {
+        status: error.status,
+        headers: error.retryAfter
+          ? { "Retry-After": String(error.retryAfter) }
+          : undefined,
+      },
     );
   }
 
