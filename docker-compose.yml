@@ -13,7 +13,8 @@ services:
       auth-postgres:
         condition: service_healthy
     environment:
-      DATABASEURL: postgres://auth:${POSTGRES_PASSWORD}@auth-postgres:5432/auth_api
+      # montada no .env: a senha vai codificada (%2F no lugar de /, etc.), por ser parte de uma URL
+      DATABASEURL: ${DATABASEURL:?defina DATABASEURL no .env}
       JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
       # IP real do visitante vem da Cloudflare (CF-Connecting-IP); o Traefik só
       # é alcançável pelo cloudflared local, então o header é confiável.

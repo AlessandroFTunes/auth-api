@@ -1,0 +1,99 @@
+# Testa e publica a API no NAS a cada push.
+#
+# Como chega no NAS: o repositório é público e o NAS só existe na tailnet, então o
+# runner do GitHub entra na Tailscale (OAuth client com a tag tag:ci) e faz SSH.
+# A imagem é construída no runner e enviada por `docker save | ssh docker load`
+# (sem registry), como no dnf-api. Depois roda `docker compose up -d` no NAS.
+#
+# Secrets necessários (Settings > Secrets and variables > Actions):
+#   TS_OAUTH_CLIENT_ID, TS_OAUTH_SECRET  OAuth client da Tailscale (escopo auth_keys, tag:ci)
+#   NAS_HOST         nome ou IP do NAS na tailnet (ex.: nas-ale ou 100.70.59.77)
+#   NAS_USER         usuário do SSH (ex.: ale)
+#   NAS_SSH_KEY      chave privada dedicada ao deploy (a pública vai no authorized_keys do NAS)
+#   NAS_KNOWN_HOSTS  saída de `ssh-keyscan -t ed25519 <NAS_HOST>`, para fixar a identidade do NAS
+#
+# No NAS é preciso existir /srv/apps/auth-api/.env (POSTGRES_PASSWORD, JWT_SECRET, API_HOST).
+name: deploy
+
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# um deploy por vez; um commit novo espera o anterior terminar
+concurrency:
+  group: deploy-nas
+  cancel-in-progress: false
+
+env:
+  APP_DIR: /srv/apps/auth-api
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun check
+      - run: bun test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Entrar na tailnet
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Configurar SSH
+        env:
+          NAS_SSH_KEY: ${{ secrets.NAS_SSH_KEY }}
+          NAS_KNOWN_HOSTS: ${{ secrets.NAS_KNOWN_HOSTS }}
+          NAS_HOST: ${{ secrets.NAS_HOST }}
+          NAS_USER: ${{ secrets.NAS_USER }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$NAS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$NAS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf 'Host nas\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' \
+            "$NAS_HOST" "$NAS_USER" > ~/.ssh/config
+
+      - name: Construir a imagem
+        run: docker build -t auth-api:latest .
+
+      - name: Enviar imagem e compose para o NAS
+        run: |
+          docker save auth-api:latest | gzip | ssh nas 'gunzip | docker load'
+          scp docker-compose.yml nas:"$APP_DIR/docker-compose.yml"
+
+      - name: Subir a stack e esperar ficar saudável
+        run: |
+          ssh nas "APP_DIR=$APP_DIR bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$APP_DIR"
+          test -f .env || { echo "ERRO: $APP_DIR/.env não existe no NAS"; exit 1; }
+          docker compose up -d --no-build --remove-orphans
+          for i in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' auth-api 2>/dev/null || echo starting)
+            if [ "$status" = healthy ]; then
+              echo "auth-api saudável"
+              docker image prune -f >/dev/null
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "ERRO: auth-api não ficou saudável a tempo"
+          docker logs --tail 60 auth-api
+          exit 1
+          REMOTE
