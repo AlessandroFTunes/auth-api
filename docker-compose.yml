@@ -1,30 +1,60 @@
+# Atrás do Traefik do NAS (rede externa "proxy"). O HTTPS termina no Cloudflare
+# Tunnel, que fala com o Traefik no entrypoint "web" (HTTP) — por isso não há TLS aqui.
+# Publicar: `docker build -t auth-api:latest .` aqui, enviar a imagem
+# (`docker save auth-api:latest | gzip | ssh ale@nas-ale 'gunzip | docker load'`)
+# e `docker compose up -d` em /srv/apps/auth-api. O .env fica só no NAS.
 services:
-  db:
+  auth-api:
+    image: auth-api:latest
+    build: .
+    container_name: auth-api
+    restart: unless-stopped
+    depends_on:
+      auth-postgres:
+        condition: service_healthy
+    environment:
+      DATABASEURL: postgres://auth:${POSTGRES_PASSWORD}@auth-postgres:5432/auth_api
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
+      # IP real do visitante vem da Cloudflare (CF-Connecting-IP); o Traefik só
+      # é alcançável pelo cloudflared local, então o header é confiável.
+      TRUST_CLOUDFLARE: "true"
+    # sem "ports": só o Traefik alcança a API, pela rede "proxy"
+    networks: [proxy, default]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth-api.rule=Host(`${API_HOST:?defina API_HOST no .env}`)"
+      - "traefik.http.routers.auth-api.entrypoints=web"
+      - "traefik.http.routers.auth-api.middlewares=auth-api-rl,security-headers@docker,compress@docker"
+      - "traefik.http.services.auth-api.loadbalancer.server.port=3000"
+      # Rate limit geral por visitante; o login tem limite próprio dentro da API.
+      - "traefik.http.middlewares.auth-api-rl.ratelimit.average=60"
+      - "traefik.http.middlewares.auth-api-rl.ratelimit.period=1m"
+      - "traefik.http.middlewares.auth-api-rl.ratelimit.burst=30"
+      - "traefik.http.middlewares.auth-api-rl.ratelimit.sourcecriterion.requestheadername=CF-Connecting-IP"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/api/status').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Só na rede interna da stack: sem porta publicada e sem rota no Traefik.
+  auth-postgres:
     image: postgres:17-alpine
+    container_name: auth-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: auth
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
       POSTGRES_DB: auth_api
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ./pg_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U auth -d auth_api"]
-      interval: 5s
-      timeout: 3s
+      interval: 10s
+      timeout: 5s
       retries: 10
 
-  api:
-    build: .
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      DATABASEURL: postgres://auth:${POSTGRES_PASSWORD}@db:5432/auth_api
-      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
-    ports:
-      - "${PORT:-3000}:3000"
-
-volumes:
-  pgdata:
+networks:
+  proxy:
+    external: true

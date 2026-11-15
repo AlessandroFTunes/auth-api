@@ -2,3 +2,4 @@ node_modules/
 .direnv/
 .env
 .pgdata/
+pg_data/
