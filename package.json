@@ -7,9 +7,18 @@
     "typecheck": "bun check"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^1.0.0-rc.5"
   },
   "peerDependencies": {
     "typescript": "^7"
+  },
+  "dependencies": {
+    "drizzle": "^1.4.0",
+    "drizzle-orm": "^1.0.0-rc.5",
+    "jose": "^6.2.17",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
   }
 }

@@ -23,27 +23,3 @@ export function errorHandle(error: unknown): Response {
     { status: 500 },
   );
 }
-
-
-export function dividr(a: number, b: number) {
-  if (b === 0)
-  {
-    throw new AppError(400,"DIVISION_BY_ZERO","Impossivel dividir algo por 0")
-  }
-  return a / b;
-}
-
-async function teste() {
-
-  try {
-    dividr(10, 0);
-  } catch (e) {
-     return errorHandle(e);
-    }
-  }
-
-  export async function main(){
-    const res = await teste();
-    console.log(res?.status , await res?.json);
-
-  }
