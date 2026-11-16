@@ -25,7 +25,7 @@ function ipDoCliente(req: Request, server: Bun.Server<undefined>): string {
   return server.requestIP(req)?.address ?? "unknown";
 }
 
-const app = Bun.serve({
+export const app = Bun.serve({
   routes: {
     "/api/status": new Response("ok"),
 
@@ -118,6 +118,25 @@ const app = Bun.serve({
             user: { id: user.id, email: user.email, project: user.project },
             accessToken,
             refreshToken,
+          });
+        } catch (e) {
+          return errorHandle(e);
+        }
+      },
+    },
+
+    "/api/me": {
+      GET: async (req) => {
+        try {
+          const [esquema, token] = (req.headers.get("authorization") ?? "").split(" ");
+          if (esquema?.toLowerCase() !== "bearer" || !token) {
+            throw new AppError(401, "INVALID_TOKEN", "Envie o header Authorization: Bearer <accessToken>");
+          }
+
+          const user = await User.me(token);
+
+          return Response.json({
+            user: { id: user.id, email: user.email, project: user.project },
           });
         } catch (e) {
           return errorHandle(e);
